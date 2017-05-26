@@ -116,13 +116,13 @@ namespace XemToXqc
                                 ? t.transaction.otherTrans?.signer        
                                 : t.transaction?.signer));
 
-                        // calculate how quantity of asset to return.
+                        // calculate quantity of asset to return.
                         var wholeAssetQuantity = (t.transaction.type == 4100 ? t.transaction.otherTrans.amount : t.transaction.amount)
-                                                  / long.Parse(ConfigurationManager.AppSettings["xemPerMosaic"]);
-
+                                                  / double.Parse(ConfigurationManager.AppSettings["xemPerMosaic"]);
+ 
                         // account for asset divisibility.
-                        var assetUnits = (long)(wholeAssetQuantity * Math.Pow (10, double.Parse(MosaicToReturn.Properties[0].Value)));
-                        
+                        var assetUnits = (long)(wholeAssetQuantity * Math.Pow (10, long.Parse(MosaicToReturn.Properties[0].Value)));
+
                         // payout XQC
                         await ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);      
                     }                
