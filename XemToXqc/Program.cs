@@ -5,7 +5,6 @@ using System.Text;
 using System.Threading.Tasks;
 using CSharp2nem;
 using System.Configuration;
-using System.Threading;
 using Chaos.NaCl;
 
 
@@ -32,6 +31,7 @@ namespace XemToXqc
             // create mosaic issuer/distributor account
             SecretAccount = new AccountFactory(Con).FromPrivateKey(ConfigurationManager.AppSettings["secretAccountKey"]);
 
+            // get required mosaic details
             MosaicToReturn = SecretAccount.GetMosaicsAsync().Result.Data.Single(
                 e => e.Id.Name == ConfigurationManager.AppSettings["mosaicNameID"] &&
                 e.Id.NamespaceId == ConfigurationManager.AppSettings["mosaicNameSpace"]);
@@ -45,30 +45,68 @@ namespace XemToXqc
         }
 
         private static async void ScanTransactions()
-        {        
-            while(true)
+        {
+            string lastIncomingTxHash = null;
+
+            var transactionsOut = GetAllPaidTransactions();
+           
+            while (true)
             {
                 try
                 {
-                    // get upto 25 last incoming deposit transactions.
-                    var incomingTransactions = await DepositAccount.GetIncomingTransactionsAsync();
+                    // get upto 25 last incoming deposit transactions up to the hash supplied.
+                    var incomingTransactions = await DepositAccount.GetIncomingTransactionsAsync(lastIncomingTxHash);
 
-                    // get up to 25 last outgoing payout transactions
-                    var outgoingTransactions = await SecretAccount.GetOutgoingTransactionsAsync();
-
-                    // get up to 25 unconfirmed outgoing payout transactions
-                    var outgoingUncomfirmedTransactions = await SecretAccount.GetUnconfirmedTransactionsAsync();
-
+                    // if no transactions, break.
+                    if (incomingTransactions?.data?.Count == 0 || incomingTransactions?.data == null)
+                    {
+                        break;
+                    }
+                   
                     // scan all incoming transactions to see if they need to be paid out assets
                     foreach (var t in incomingTransactions.data)
                     {
-                       
+                        // set last hash to the hash of the last transaction in the previous list. (null on the first go round)
+                        // you can only retrieve 25 txs at a time, up to a given hash. providing the hash of 
+                        // the last transaction in the previous list will give the next 25 transactions that happened prior to the hash provided
+                        lastIncomingTxHash = t.meta.hash.data;
+
+                        // assume unpaid
+                        var paid = false;
+
+                        // loop all outgoing and unconfirmed outgoing transactions
+                        foreach (var confTx in transactionsOut.Result)
+                        {
+                            // if message is not null, could contain a payout hash
+                            if (confTx?.transaction?.message?.payload != null)
+                            {
+                                // if the hash in the outgoing message matches the hash of the deposit transaction being checked,
+                                // its been paid, so print out, declare paid and stop looping through outgoing txs
+                                if (Encoding.UTF8.GetString(CryptoBytes.FromHexString(confTx.transaction.message.payload)) == (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data))
+                                {
+                                    // print out paid hash    
+                                    Console.WriteLine("hash of paid tx:");
+                                    Console.WriteLine(Encoding.UTF8.GetString(CryptoBytes.FromHexString(confTx.transaction.message.payload)));
+                                    Console.WriteLine();
+
+                                    paid = true;
+                                    break;
+                                }
+                            }      
+                        }
+
+                        // if paid, continue to check the next incoming transaction
+                        if (paid)
+                        {
+                            continue;
+                        }
+
                         // if the transaction isnt a transfer transaction or has zero amount, skip it.
                         // othertrans is support for multisig transfers
                         if (t.transaction.type != 257 && t.transaction?.otherTrans?.type != 257
                          || t.transaction?.amount <= 0 && t.transaction?.otherTrans?.amount <= 0) continue;
-                        
-                       
+
+                                        
                         // if the deposit contains a mosaic, ignore - could be a refund.
                         if (t.transaction.mosaics != null
                          || t.transaction?.otherTrans?.mosaics != null) continue;
@@ -76,46 +114,14 @@ namespace XemToXqc
                         // if deposit account does an accidental payment to itself it will pay itself out, so ignore any transactions to self.
                         // manually convert tx signer to address in case public key of deposit address is not yet known.
                         if (new Address(AddressEncoding.ToEncoded(Con.GetNetworkVersion(), new PublicKey(t.transaction.type == 4100
-                                ? t.transaction.otherTrans?.signer : t.transaction?.signer))).Encoded == DepositAccount.Address.Encoded) continue;
-                
-                        // assume all transacions unpaid
-                        var transactionPaid = false;
-            
-                        // loop through all unconfirmed payout transactions
-                        foreach (var tx in outgoingUncomfirmedTransactions.data)
-                        {
-                            // if the payout transaction message is null, its not needed to check, so skip.
-                            if (tx.transaction?.message?.payload == null 
-                                && tx.transaction?.otherTrans?.message?.payload == null) continue;
-
-                            // if the message contains the hash of a deposit, its paid.
-                            if (Encoding.UTF8.GetString(CryptoBytes.FromHexString(tx.transaction?.message?.payload ?? tx.transaction?.otherTrans?.message?.payload)) 
-                                == (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data))
-                                transactionPaid = true;
-                        }
-                            
-                        // as above, but checks unconfirmed to prevent paying out multiple times before the first payout is confirmed
-                        foreach (var tx in outgoingTransactions.data)
-                        {
-                            // as above for confirmed transactions
-                            if (tx.transaction?.message?.payload == null 
-                                && tx.transaction?.otherTrans?.message?.payload == null) continue;
-
-                            // as above for confirmed transactions
-                            if (Encoding.UTF8.GetString(CryptoBytes.FromHexString(tx.transaction?.message?.payload ?? tx.transaction?.otherTrans?.message?.payload)) 
-                                == (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data))
-                                transactionPaid = true;
-                        }
-
-                        // if the transaction t was paid, skip it.
-                        if (transactionPaid) continue;
+                                ? t.transaction.otherTrans?.signer : t.transaction?.signer))).Encoded == DepositAccount.Address.Encoded) continue;                
                       
                         // create the recipient      
                         var recipient = Con.GetNetworkVersion().ToEncoded(
                             new PublicKey(t.transaction.type == 4100      
                                 ? t.transaction.otherTrans?.signer        
                                 : t.transaction?.signer));
-
+                        
                         // calculate quantity of asset to return.
                         var wholeAssetQuantity = (t.transaction.type == 4100 ? t.transaction.otherTrans.amount : t.transaction.amount)
                                                   / double.Parse(ConfigurationManager.AppSettings["xemPerMosaic"]);
@@ -123,23 +129,67 @@ namespace XemToXqc
                         // account for asset divisibility.
                         var assetUnits = (long)(wholeAssetQuantity * Math.Pow (10, long.Parse(MosaicToReturn.Properties[0].Value)));
 
+                        // print out incoming hash
+                        Console.WriteLine("incoming hash to pay: \n" + (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data));
+                        
                         // payout XQC
                         await ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);      
-                    }                
+                    }       
                 }
                 catch (Exception e)
                 {
                     Console.WriteLine(e);
                 }
+            }
 
-                Thread.Sleep(60000);
-            }        
+            Console.WriteLine("all transactions checked and paid");
+        }
+
+        private static async Task<List<Transactions.TransactionData>> GetAllPaidTransactions()
+        {
+            // set to null so that it retrieves the newest set of transactions
+            string lastHashConfirmed = null;
+            
+            // declare transactions list
+            var transactions = new List<Transactions.TransactionData>();
+            
+            // loop through all outgoing transactions and aggregate them until none are left.
+            while (true)
+            {
+                // get all transactions up to the last hash checked in previous loop
+                var t = await SecretAccount.GetOutgoingTransactionsAsync(lastHashConfirmed);
+
+                // break if theres no transactions
+                if (t?.data == null || t?.data?.Count == 0)
+                {
+                    break;
+                }
+
+                lastHashConfirmed = t.data[t.data.Count - 1].meta.hash.data;
+                // if no transactions, break from the loop
+                
+
+                // add any transactions retrieved to the list.
+                transactions.AddRange(t.data);
+            }
+
+            // get up to 25 unconfirmed outgoing payout transactions to prevent paying out twice before txs confirm.
+            var outgoingUncomfirmedTransactions = await SecretAccount.GetUnconfirmedTransactionsAsync();
+
+            // add them to the list
+            transactions.AddRange(outgoingUncomfirmedTransactions.data);
+
+            Console.WriteLine();
+
+            return transactions;
         }
 
         private static async Task ReturnAsset(string address, long amount, string hash)
         {
             try
-            {                
+            {               
+                Console.WriteLine("hesh to go in message: " + hash); 
+
                 // create mosaic to be sent
                 var mosaicsToSend = new List<Mosaic>()
                 {              
@@ -147,7 +197,9 @@ namespace XemToXqc
                                MosaicToReturn.Id.Name,
                                amount)
                 };
-               
+
+                Console.WriteLine("address to send to: \n" + address);
+
                 var transferData = new TransferTransactionData()
                 {
                     Amount = 0, // no xem to be sent but is still required.
@@ -161,6 +213,7 @@ namespace XemToXqc
 
                 // print out result
                 Console.WriteLine(result.Message);
+                Console.WriteLine();
             }
             catch (Exception e)
             {
