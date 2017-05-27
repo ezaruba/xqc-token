@@ -67,8 +67,8 @@ namespace XemToXqc
                     foreach (var t in incomingTransactions.data)
                     {
                         // set last hash to the hash of the last transaction in the previous list. (null on the first go round)
-                        // you can only retrieve 25 txs at a time, up to a given hash. providing the hash of 
-                        // the last transaction in the previous list will give the next 25 transactions that happened prior to the hash provided
+                        // you can only retrieve 25 txs at a time. providing the hash of the last transaction 
+                        // in the previous list will give the next 25 transactions that happened prior to the hash provided
                         lastIncomingTxHash = t.meta.hash.data;
 
                         // assume unpaid
@@ -165,9 +165,8 @@ namespace XemToXqc
                     break;
                 }
 
+                // if there are more transactions, set the last hash to that of the last hash in the list of transactions
                 lastHashConfirmed = t.data[t.data.Count - 1].meta.hash.data;
-                // if no transactions, break from the loop
-                
 
                 // add any transactions retrieved to the list.
                 transactions.AddRange(t.data);
@@ -217,8 +216,6 @@ namespace XemToXqc
             }
             catch (Exception e)
             {
-                // its normal to see some task cancled excpetions. its because a node might not respond in time.
-                // if this happens it will pick up any unpaid deposits and pay them next time around so the exception can be ignored.
                 Console.WriteLine(e);
             }
         }
