@@ -78,28 +78,24 @@ namespace XemToXqc
                         foreach (var confTx in transactionsOut.Result)
                         {
                             // if message is not null, could contain a payout hash
-                            if (confTx?.transaction?.message?.payload != null)
-                            {
-                                // if the hash in the outgoing message matches the hash of the deposit transaction being checked,
-                                // its been paid, so print out, declare paid and stop looping through outgoing txs
-                                if (Encoding.UTF8.GetString(CryptoBytes.FromHexString(confTx.transaction.message.payload)) == (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data))
-                                {
-                                    // print out paid hash    
-                                    Console.WriteLine("hash of paid tx:");
-                                    Console.WriteLine(Encoding.UTF8.GetString(CryptoBytes.FromHexString(confTx.transaction.message.payload)));
-                                    Console.WriteLine();
+                            if (confTx?.transaction?.message?.payload == null) continue;
 
-                                    paid = true;
-                                    break;
-                                }
-                            }      
+                            // if the hash in the outgoing message matches the hash of the deposit transaction being checked,
+                            // its been paid, so print out, declare paid and stop looping through outgoing txs
+                            if (Encoding.UTF8.GetString(CryptoBytes.FromHexString(confTx.transaction.message.payload)) 
+                                != (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data)) continue;
+
+                            // print out paid hash    
+                            Console.WriteLine("hash of paid tx:");
+                            Console.WriteLine(Encoding.UTF8.GetString(CryptoBytes.FromHexString(confTx.transaction.message.payload)));
+                            Console.WriteLine();
+
+                            paid = true;
+                            break;
                         }
 
                         // if paid, continue to check the next incoming transaction
-                        if (paid)
-                        {
-                            continue;
-                        }
+                        if (paid) continue;
 
                         // if the transaction isnt a transfer transaction or has zero amount, skip it.
                         // othertrans is support for multisig transfers
@@ -113,7 +109,7 @@ namespace XemToXqc
 
                         // if deposit account does an accidental payment to itself it will pay itself out, so ignore any transactions to self.
                         // manually convert tx signer to address in case public key of deposit address is not yet known.
-                        if (new Address(AddressEncoding.ToEncoded(Con.GetNetworkVersion(), new PublicKey(t.transaction.type == 4100
+                        if (new Address(Con.GetNetworkVersion().ToEncoded(new PublicKey(t.transaction.type == 4100
                                 ? t.transaction.otherTrans?.signer : t.transaction?.signer))).Encoded == DepositAccount.Address.Encoded) continue;                
                       
                         // create the recipient      
@@ -132,7 +128,7 @@ namespace XemToXqc
                         // print out incoming hash
                         Console.WriteLine("incoming hash to pay: \n" + (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data));
                         
-                        // payout XQC
+                        // payout asset
                         await ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);      
                     }       
                 }
@@ -187,8 +183,6 @@ namespace XemToXqc
         {
             try
             {               
-                Console.WriteLine("hesh to go in message: " + hash); 
-
                 // create mosaic to be sent
                 var mosaicsToSend = new List<Mosaic>()
                 {              
@@ -199,6 +193,7 @@ namespace XemToXqc
 
                 Console.WriteLine("address to send to: \n" + address);
 
+                // initialize transaction data
                 var transferData = new TransferTransactionData()
                 {
                     Amount = 0, // no xem to be sent but is still required.
