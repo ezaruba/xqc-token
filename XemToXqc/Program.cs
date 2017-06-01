@@ -131,7 +131,9 @@ namespace XemToXqc
                         // if transaction contains a mosaic of type xem, calculate whole assets to be paid out and include.
                         // xem can be sent both as version one and two type transactions ie. attached as a mosaic. in some cases people may send xem as a mosaic
                         // of type xem so catch it if they do.
-                        if ((t.transaction.type == 4100 ? t.transaction.otherTrans.mosaics : t.transaction.mosaics) != null)
+                        if ((t.transaction.type == 4100 ? t.transaction.otherTrans.mosaics : t.transaction.mosaics) != null 
+                         && (t.transaction.type == 4100 ? t.transaction.otherTrans.mosaics : t.transaction.mosaics).Exists(
+                             e => e.mosaicId.namespaceId == "nem" && e.mosaicId.name == "xem"))
                         {
                             var mosaic = (t.transaction.type == 4100 ? t.transaction.otherTrans.mosaics : t.transaction.mosaics)
                                              .Single(e =>  e.mosaicId.namespaceId == "nem" && e.mosaicId.name == "xem");
