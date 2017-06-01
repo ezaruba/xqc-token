@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using CSharp2nem;
 using System.Configuration;
+using System.Threading;
 using Chaos.NaCl;
 
 
@@ -97,18 +98,14 @@ namespace XemToXqc
                         // if paid, continue to check the next incoming transaction
                         if (paid) continue;
 
-                        // if the transaction isnt a transfer transaction or has zero amount, skip it.
-                        // othertrans is support for multisig transfers
-                        if (t.transaction.type != 257 && t.transaction?.otherTrans?.type != 257
-                         || t.transaction?.amount <= 0 && t.transaction?.otherTrans?.amount <= 0) continue;
+                        Console.WriteLine(t.transaction?.amount);
+                        // if the transaction isnt a transfer transaction, skip it.
+                        // othertrans is support for multisig transfers. 
+                        if (t.transaction.type != 257 && t.transaction?.otherTrans?.type != 257) continue;
 
-                                        
-                        // if the deposit contains a mosaic, ignore - could be a refund.
-                        if (t.transaction.mosaics != null
-                         || t.transaction?.otherTrans?.mosaics != null) continue;
 
-                        // if deposit account does an accidental payment to itself it will pay itself out, so ignore any transactions to self.
-                        // manually convert tx signer to address in case public key of deposit address is not yet known.
+                        // if deposit account does an accidental payment to itself it will pay itself out, so ignore any transactions to self on the off chance it happens.
+                        //    manually convert tx signer to address in case public key of deposit address is not yet known.
                         if (new Address(Con.GetNetworkVersion().ToEncoded(new PublicKey(t.transaction.type == 4100
                                 ? t.transaction.otherTrans?.signer : t.transaction?.signer))).Encoded == DepositAccount.Address.Encoded) continue;                
                       
@@ -117,19 +114,43 @@ namespace XemToXqc
                             new PublicKey(t.transaction.type == 4100      
                                 ? t.transaction.otherTrans?.signer        
                                 : t.transaction?.signer));
-                        
+
+
+                        // declare 
+                        double wholeAssetQuantity = 0.0;
+
+                        // get cost of asset
+                        var xemPerMosaic = double.Parse(ConfigurationManager.AppSettings["xemPerMosaic"]);
+
                         // calculate quantity of asset to return.
-                        var wholeAssetQuantity = (t.transaction.type == 4100 ? t.transaction.otherTrans.amount : t.transaction.amount)
-                                                  / double.Parse(ConfigurationManager.AppSettings["xemPerMosaic"]);
+                        wholeAssetQuantity += (t.transaction.type == 4100
+                                                    ? t.transaction.otherTrans.amount
+                                                    : t.transaction.amount) 
+                                                / xemPerMosaic;
+
+                        // if transaction contains a mosaic of type xem, calculate whole assets to be paid out and include.
+                        // xem can be sent both as version one and two type transactions ie. attached as a mosaic. in some cases people may send xem as a mosaic
+                        // of type xem so catch it if they do.
+                        if ((t.transaction.type == 4100 ? t.transaction.otherTrans.mosaics : t.transaction.mosaics) != null)
+                        {
+                            var mosaic = (t.transaction.type == 4100 ? t.transaction.otherTrans.mosaics : t.transaction.mosaics)
+                                             .Single(e =>  e.mosaicId.namespaceId == "nem" && e.mosaicId.name == "xem");
+
+                            wholeAssetQuantity += mosaic.quantity / xemPerMosaic;
+                        }
  
                         // account for asset divisibility.
                         var assetUnits = (long)(wholeAssetQuantity * Math.Pow (10, long.Parse(MosaicToReturn.Properties[0].Value)));
 
                         // print out incoming hash
-                        Console.WriteLine("incoming hash to pay: \n" + (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data));
-                        
+                        Console.WriteLine("incoming hash to pay: \n" + (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data)); 
+
                         // payout asset
-                        await ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);      
+                        await ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);
+
+                        // could flood the network with transactions, so limit to 1 transactions per min, 
+                        // also helps disperse transaction fees among harvesters.
+                        Thread.Sleep(60000);
                     }       
                 }
                 catch (Exception e)
