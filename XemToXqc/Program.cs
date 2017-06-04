@@ -38,14 +38,12 @@ namespace XemToXqc
                 e.Id.NamespaceId == ConfigurationManager.AppSettings["mosaicNameSpace"]);
 
             // run task to scan for incoming transactions and return x amount of asset
-            T = Task.Run(() => ScanTransactions());
+            ScanTransactions();
 
             Console.WriteLine("Bot started..");
-
-            Console.ReadKey();
         }
 
-        private static async void ScanTransactions()
+        private static void ScanTransactions()
         {
             string lastIncomingTxHash = null;
 
@@ -56,7 +54,7 @@ namespace XemToXqc
                 try
                 {
                     // get upto 25 last incoming deposit transactions up to the hash supplied.
-                    var incomingTransactions = await DepositAccount.GetIncomingTransactionsAsync(lastIncomingTxHash);
+                    var incomingTransactions = DepositAccount.GetIncomingTransactionsAsync(lastIncomingTxHash).Result;
 
                     // if no transactions, break.
                     if (incomingTransactions?.data?.Count == 0 || incomingTransactions?.data == null)
@@ -76,7 +74,7 @@ namespace XemToXqc
                         var paid = false;
 
                         // loop all outgoing and unconfirmed outgoing transactions
-                        foreach (var confTx in transactionsOut.Result)
+                        foreach (var confTx in transactionsOut)
                         {
                             // if message is not null, could contain a payout hash
                             if (confTx?.transaction?.message?.payload == null) continue;
@@ -98,7 +96,7 @@ namespace XemToXqc
                         // if paid, continue to check the next incoming transaction
                         if (paid) continue;
 
-                        Console.WriteLine(t.transaction?.amount);
+                        
                         // if the transaction isnt a transfer transaction, skip it.
                         // othertrans is support for multisig transfers. 
                         if (t.transaction.type != 257 && t.transaction?.otherTrans?.type != 257) continue;
@@ -148,11 +146,11 @@ namespace XemToXqc
                         Console.WriteLine("incoming hash to pay: \n" + (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data)); 
 
                         // payout asset
-                        await ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);
+                        ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);
 
                         // could flood the network with transactions, so limit to 1 transactions per min, 
                         // also helps disperse transaction fees among harvesters.
-                        Thread.Sleep(60000);
+                        Thread.Sleep(10000);
                     }       
                 }
                 catch (Exception e)
@@ -164,7 +162,7 @@ namespace XemToXqc
             Console.WriteLine("all transactions checked and paid");
         }
 
-        private static async Task<List<Transactions.TransactionData>> GetAllPaidTransactions()
+        private static List<Transactions.TransactionData> GetAllPaidTransactions()
         {
             // set to null so that it retrieves the newest set of transactions
             string lastHashConfirmed = null;
@@ -176,7 +174,7 @@ namespace XemToXqc
             while (true)
             {
                 // get all transactions up to the last hash checked in previous loop
-                var t = await SecretAccount.GetOutgoingTransactionsAsync(lastHashConfirmed);
+                var t = SecretAccount.GetOutgoingTransactionsAsync(lastHashConfirmed).Result;
 
                 // break if theres no transactions
                 if (t?.data == null || t?.data?.Count == 0)
@@ -192,7 +190,7 @@ namespace XemToXqc
             }
 
             // get up to 25 unconfirmed outgoing payout transactions to prevent paying out twice before txs confirm.
-            var outgoingUncomfirmedTransactions = await SecretAccount.GetUnconfirmedTransactionsAsync();
+            var outgoingUncomfirmedTransactions = SecretAccount.GetUnconfirmedTransactionsAsync().Result;
 
             // add them to the list
             transactions.AddRange(outgoingUncomfirmedTransactions.data);
@@ -202,10 +200,12 @@ namespace XemToXqc
             return transactions;
         }
 
-        private static async Task ReturnAsset(string address, long amount, string hash)
+        private static void ReturnAsset(string address, long amount, string hash)
         {
             try
-            {               
+            {
+                Console.WriteLine("amount: " + amount);
+                   
                 // create mosaic to be sent
                 var mosaicsToSend = new List<Mosaic>()
                 {              
@@ -226,7 +226,7 @@ namespace XemToXqc
                 };
 
                 // send the transaction
-                var result = await SecretAccount.SendTransactionAsync(transferData);
+                var result = SecretAccount.SendTransactionAsync(transferData).Result;
 
                 // print out result
                 Console.WriteLine(result.Message);
