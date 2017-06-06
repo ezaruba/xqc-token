@@ -7,6 +7,7 @@ using CSharp2nem;
 using System.Configuration;
 using System.Threading;
 using Chaos.NaCl;
+using Newtonsoft.Json;
 
 
 namespace XemToXqc
@@ -146,7 +147,7 @@ namespace XemToXqc
                         Console.WriteLine("incoming hash to pay: \n" + (t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data)); 
 
                         // payout asset
-                        ReturnAsset(recipient, assetUnits, t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);
+                        ReturnAsset(recipient, RoundUp(assetUnits, 6 - int.Parse(MosaicToReturn.Properties[0].Value)), t.transaction.type == 4100 ? t.meta.innerHash.data : t.meta.hash.data);
 
                         // could flood the network with transactions, so limit to 1 transactions per min, 
                         // also helps disperse transaction fees among harvesters.
@@ -161,7 +162,7 @@ namespace XemToXqc
 
             Console.WriteLine("all transactions checked and paid");
         }
-
+        
         private static List<Transactions.TransactionData> GetAllPaidTransactions()
         {
             // set to null so that it retrieves the newest set of transactions
@@ -177,7 +178,7 @@ namespace XemToXqc
                 var t = SecretAccount.GetOutgoingTransactionsAsync(lastHashConfirmed).Result;
 
                 // break if theres no transactions
-                if (t?.data == null || t?.data?.Count == 0)
+                if (t?.data == null || t.data?.Count == 0)
                 {
                     break;
                 }
@@ -196,7 +197,6 @@ namespace XemToXqc
             transactions.AddRange(outgoingUncomfirmedTransactions.data);
 
             Console.WriteLine();
-
             return transactions;
         }
 
@@ -204,14 +204,12 @@ namespace XemToXqc
         {
             try
             {
-                Console.WriteLine("amount: " + amount);
-                   
                 // create mosaic to be sent
                 var mosaicsToSend = new List<Mosaic>()
                 {              
                     new Mosaic(MosaicToReturn.Id.NamespaceId,
                                MosaicToReturn.Id.Name,
-                               amount)
+                               RoundUp(amount, 6 - int.Parse(MosaicToReturn.Properties[0].Value)))
                 };
 
                 Console.WriteLine("address to send to: \n" + address);
@@ -236,6 +234,13 @@ namespace XemToXqc
             {
                 Console.WriteLine(e);
             }
+        }
+
+        public static long RoundUp(long amount, int places)
+        {
+            var multiplier = (long)Math.Pow(10, Convert.ToDouble(places));
+
+            return (long)(Math.Ceiling((double)amount / multiplier) * multiplier);
         }
     }
 }
