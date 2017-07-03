@@ -217,7 +217,7 @@ namespace XemToXqc
                 // initialize transaction data
                 var transferData = new TransferTransactionData()
                 {
-                    Amount = 0, // no xem to be sent but is still required.
+                    Amount = 1, // no xem to be sent but amount acts as multiplier
                     Message = hash, // include the hash of the deposit transaction for tracability
                     ListOfMosaics = mosaicsToSend, // include list of mosaics to send, in this case just one but needs to be a list.
                     Recipient = new AccountFactory(Con).FromEncodedAddress(address) // recipient of the transaction
